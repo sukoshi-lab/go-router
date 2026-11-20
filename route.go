@@ -43,8 +43,18 @@ func (r *Router[T]) GetParam(path string, params map[string]string) (zero T) {
 	return n.handler
 }
 
-func (r *Router[T]) GetAllMatches(path string, f func(T) (more bool)) {
-	if path == "" || path[0] != '/' || len(r.tree.children) == 0 || f == nil {
+// Get matches the given path and returns the corresponding value.
+// If no pattern is found, the zero value is returned. It's routine-safe.
+func (r *Router[T]) Get(path string) T {
+	return r.GetParam(path, nil)
+}
+
+// Walk calls f with the value of every pattern matching the given path, until f
+// returns false. A pattern's value comes after the values of the patterns
+// nested under it; siblings go literals first, then params, regexes and wildcards.
+// It's routine-safe.
+func (r *Router[T]) Walk(path string, f func(T) (more bool)) {
+	if path == "" || path[0] != '/' || len(r.tree.children) == 0 {
 		return
 	}
 	n := &r.tree
@@ -59,15 +69,9 @@ func (r *Router[T]) GetAllMatches(path string, f func(T) (more bool)) {
 			n, path = ch, path[end:]
 		}
 	}
-	if !n.getcb(path, f) && path == "" {
+	if n.walk(path, f) && path == "" && n.assigned {
 		f(n.handler)
 	}
-}
-
-// Get matches the given path and returns the corresponding value.
-// If no pattern is found, the zero value is returned. It's routine-safe.
-func (r *Router[T]) Get(path string) T {
-	return r.GetParam(path, nil)
 }
 
 func NewRouter[T any]() *Router[T] {

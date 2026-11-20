@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,21 +34,145 @@ func TestRouterOrder(t *testing.T) {
 	}
 }
 
-func TestGetAllMatches(t *testing.T) {
+// registering a pattern that equals an existing node used to index an empty path.
+func TestSetPatternEqualToSplitNode(t *testing.T) {
 	r := NewRouter[int]()
-	r.Set("/{path:*}", 1)
-	r.Set("/ab{var}", 2)
-	r.Set("/absolute", 3)
-	r.Set("/{reg:.*}", 4)
-	r.Set("/abs{var}", 5)
-	r.Set("/{reg:([a-z]*)}", 6)
-	cnt := 6
-	r.GetAllMatches("/absolute", func(hit int) bool {
-		cnt--
+	for i, p := range []string{"/a/b", "/a{x:*}", "/a"} {
+		if err := r.Set(p, i); err != nil {
+			t.Fatalf("Set(%q): %v", p, err)
+		}
+	}
+	for path, want := range map[string]int{"/a/b": 0, "/ax": 1} {
+		if got := r.Get(path); got != want {
+			t.Errorf("Get(%q) = %d, want %d", path, got, want)
+		}
+	}
+}
+
+func walk(r *Router[int], path string) (hits []int) {
+	r.Walk(path, func(v int) bool {
+		hits = append(hits, v)
 		return true
 	})
-	if cnt != 0 {
-		t.Errorf("expected to match 6, got %d remaining", cnt)
+	return hits
+}
+
+func TestWalk(t *testing.T) {
+	check := func(name string, got, want []int) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s: got %v, want %v", name, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("%s: got %v, want %v", name, got, want)
+			}
+		}
+	}
+
+	r := NewRouter[int]()
+	for i, p := range []string{"/{path:*}", "/ab{var}", "/absolute", "/{reg:.*}", "/abs{var}", "/{reg:([a-z]*)}"} {
+		if err := r.Set(p, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := walk(r, "/absolute")
+	if len(got) != 6 {
+		t.Errorf("expected 6 matches, got %v", got)
+	}
+
+	r = NewRouter[int]()
+	r.Set("/{path:*}", 1)
+	r.Set("/payment/v1/{path:*}", 2)
+	r.Set("/payment/v1/pay", 3)
+	check("nested first", walk(r, "/payment/v1/pay"), []int{3, 2, 1})
+	check("wildcard only", walk(r, "/payments/v1/pay"), []int{1})
+
+	r = NewRouter[int]()
+	r.Set("/a", 1)
+	r.Set("/a{x:*}", 2)
+	check("own handler with matching descendant", walk(r, "/a"), []int{2, 1})
+
+	r = NewRouter[int]()
+	r.Set("/x", 1)
+	r.Set("/y", 2)
+	check("unregistered root", walk(r, "/"), nil)
+	r.Set("/", 3)
+	check("registered root", walk(r, "/"), []int{3})
+
+	check("not a path", walk(r, "x"), nil)
+	check("empty path", walk(r, ""), nil)
+	check("empty router", walk(NewRouter[int](), "/x"), nil)
+
+	r = NewRouter[int]()
+	r.Set("/a", 1)
+	r.Set("/a/b", 2)
+	r.Set("/a/{p}", 3)
+	r.Set("/{q:*}", 4)
+	calls := 0
+	r.Walk("/a/b", func(int) bool { calls++; return false })
+	if calls != 1 {
+		t.Errorf("expected Walk to stop after f returned false, got %d calls", calls)
+	}
+}
+
+// Walk over one tree must hit exactly the patterns that match on their own.
+func TestWalkEqualsIndependentMatches(t *testing.T) {
+	patterns := []string{
+		"/", "/a", "/a{x:*}", "/a/{x}", "/a/{x:*}", "/ab", "/ab{x}", "/{x}", "/{x:*}", "/{x:[a-z]+}",
+		"/a/b", "/a/b/{x:*}", "/a/{x}/c", "/payment/v1/pay", "/payment/v1/{x:*}",
+	}
+	paths := []string{
+		"/", "/a", "/ab", "/abc", "/a/", "/a/b", "/a/b/", "/a/b/c", "/a/b/c/d", "/a/x/c", "/b", "/zzz",
+		"/a1", "/ab/c", "/payment/v1/pay", "/payment/v1/refund", "/payments/v1/pay",
+	}
+	rng := rand.New(rand.NewSource(1))
+	for round := 0; round < 300; round++ {
+		var picked []string
+		for _, p := range patterns {
+			if rng.Intn(2) == 0 {
+				picked = append(picked, p)
+			}
+		}
+		rng.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
+
+		all := NewRouter[int]()
+		alone := map[int]*Router[int]{}
+		for i, p := range picked {
+			single := NewRouter[int]()
+			if err := single.Set(p, i+1); err != nil {
+				t.Fatalf("Set(%q): %v", p, err)
+			}
+			alone[i+1] = single
+			if err := all.Set(p, i+1); err != nil {
+				t.Fatalf("round %d: Set(%q) after %q: %v", round, p, picked[:i], err)
+			}
+		}
+		for _, path := range paths {
+			want := map[int]bool{}
+			for id, single := range alone {
+				if single.Get(path) != 0 {
+					want[id] = true
+				}
+			}
+			got := map[int]bool{}
+			for _, id := range walk(all, path) {
+				if got[id] {
+					t.Fatalf("round %d, path %q: pattern %d walked twice, patterns %q", round, path, id, picked)
+				}
+				got[id] = true
+			}
+			for id := range want {
+				if !got[id] {
+					t.Errorf("round %d, path %q: missed %q, patterns %q", round, path, picked[id-1], picked)
+				}
+			}
+			for id := range got {
+				if !want[id] {
+					t.Errorf("round %d, path %q: extra %q, patterns %q", round, path, picked[id-1], picked)
+				}
+			}
+		}
 	}
 }
 

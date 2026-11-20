@@ -21,6 +21,9 @@ func (n *node[T]) add(path, fullPath string, handler T) (*node[T], error) {
 			}
 		}
 
+		if inserted {
+			continue
+		}
 		switch next := next.(type) {
 		case literal:
 			maxi, maxl := -1, 0
@@ -102,7 +105,9 @@ func (n *node[T]) get(path string, params map[string]string) *node[T] {
 	return nil
 }
 
-func (n *node[T]) getcb(path string, f func(n T) (more bool)) (has bool) {
+// walk calls f with every handler matching path, a child's descendants before
+// the child itself. It returns false once f asked to stop.
+func (n *node[T]) walk(path string, f func(T) (more bool)) bool {
 	for i := 0; i < len(n.children); i++ {
 		child, end, ok := n.children[i], 0, false
 		if child.b != 0 {
@@ -116,17 +121,14 @@ func (n *node[T]) getcb(path string, f func(n T) (more bool)) (has bool) {
 		} else if end, _, ok = child.m.match(path); !ok {
 			continue
 		}
-		if len(child.children) == 0 || !child.getcb(path[end:], f) {
-			if !child.assigned || end != len(path) {
-				continue
-			}
-			if !f(child.handler) {
-				return true
-			}
+		if len(child.children) != 0 && !child.walk(path[end:], f) {
+			return false
 		}
-		has = true // no return here, iterate entire tree
+		if child.assigned && end == len(path) && !f(child.handler) {
+			return false
+		}
 	}
-	return
+	return true
 }
 
 func (n *node[T]) cut(i int) *node[T] {
