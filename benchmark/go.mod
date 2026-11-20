@@ -1,13 +1,13 @@
-module github.com/frankli0324/go-router/benchmark
+module github.com/sukoshi-lab/go-router/benchmark
 
 go 1.23.0
 
-replace github.com/frankli0324/go-router => ../
+replace github.com/sukoshi-lab/go-router => ../
 
 require (
 	github.com/bytedance/gg v1.1.0
 	github.com/fasthttp/router v1.5.4
-	github.com/frankli0324/go-router v0.0.0-00010101000000-000000000000
+	github.com/sukoshi-lab/go-router v0.0.0-00010101000000-000000000000
 	github.com/savsgio/gotils v0.0.0-20250408102913-196191ec6287
 	github.com/valyala/fasthttp v1.64.0
 	gotest.tools/v3 v3.5.2

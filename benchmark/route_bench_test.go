@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/fasthttp/router/radix"
-	ar "github.com/frankli0324/go-router"
-	"github.com/frankli0324/go-router/benchmark/router"
+	ar "github.com/sukoshi-lab/go-router"
+	"github.com/sukoshi-lab/go-router/benchmark/router"
 	"github.com/valyala/fasthttp"
 )
 

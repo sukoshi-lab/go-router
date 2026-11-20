@@ -3,7 +3,7 @@ package router
 import (
 	"errors"
 
-	"github.com/frankli0324/go-router/benchmark/router/radix"
+	"github.com/sukoshi-lab/go-router/benchmark/router/radix"
 )
 
 type Router[T comparable] struct {

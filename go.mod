@@ -1,3 +1,3 @@
-module github.com/frankli0324/go-router
+module github.com/sukoshi-lab/go-router
 
 go 1.18
