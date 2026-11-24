@@ -2,6 +2,23 @@ package router
 
 type Router[T any] struct {
 	tree node[T]
+	options
+}
+
+type options struct {
+	allowConflict bool
+}
+
+// Option configures a Router created by NewRouter.
+type Option func(*options)
+
+// AllowConflict lets params or wildcards share a position though they may match
+// the same path, like /a/{id} next to /a/{oid}, and so
+// regexes of the same expression under different names, instead of failing
+// Set with ErrExprConflict. Walk visits every one of them matching the path;
+// Get returns the first matching one in sibling order.
+func AllowConflict() Option {
+	return func(o *options) { o.allowConflict = true }
 }
 
 // Set registers a value for the given URL pattern. It's not routine-safe.
@@ -9,7 +26,7 @@ func (r *Router[T]) Set(path string, handler T) error {
 	if path == "" || path[0] != '/' {
 		return ErrInvalidPath.With(path)
 	}
-	_, err := r.tree.add(path, path, handler)
+	_, err := r.tree.add(path, path, handler, r.allowConflict)
 	r.tree.sort()
 	return err
 }
@@ -74,6 +91,10 @@ func (r *Router[T]) Walk(path string, f func(T) (more bool)) {
 	}
 }
 
-func NewRouter[T any]() *Router[T] {
-	return &Router[T]{tree: node[T]{m: literal("")}}
+func NewRouter[T any](opts ...Option) *Router[T] {
+	r := &Router[T]{tree: node[T]{m: literal("")}}
+	for _, opt := range opts {
+		opt(&r.options)
+	}
+	return r
 }

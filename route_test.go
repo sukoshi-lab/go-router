@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -118,13 +119,25 @@ func TestWalk(t *testing.T) {
 
 // Walk over one tree must hit exactly the patterns that match on their own.
 func TestWalkEqualsIndependentMatches(t *testing.T) {
-	patterns := []string{
+	walkEqualsIndependent(t, []string{
 		"/", "/a", "/a{x:*}", "/a/{x}", "/a/{x:*}", "/ab", "/ab{x}", "/{x}", "/{x:*}", "/{x:[a-z]+}",
 		"/a/b", "/a/b/{x:*}", "/a/{x}/c", "/payment/v1/pay", "/payment/v1/{x:*}",
-	}
+	})
+}
+
+func TestWalkEqualsIndependentMatchesConflict(t *testing.T) {
+	walkEqualsIndependent(t, []string{
+		"/a/{x}", "/a/{y}", "/a/{x}.json", "/a/{y}.xml", "/a/{x:*}", "/a/{y:*}", "/{x}", "/{y}",
+		"/a/{x}/c", "/a/{y}/c", "/{x:[a-z]+}", "/a/b", "/payment/v1/{x:*}", "/payment/v1/{y:*}",
+	}, AllowConflict())
+}
+
+func walkEqualsIndependent(t *testing.T, patterns []string, opts ...Option) {
+	t.Helper()
 	paths := []string{
 		"/", "/a", "/ab", "/abc", "/a/", "/a/b", "/a/b/", "/a/b/c", "/a/b/c/d", "/a/x/c", "/b", "/zzz",
 		"/a1", "/ab/c", "/payment/v1/pay", "/payment/v1/refund", "/payments/v1/pay",
+		"/a/1.json", "/a/1.xml", "/a/1.txt",
 	}
 	rng := rand.New(rand.NewSource(1))
 	for round := 0; round < 300; round++ {
@@ -136,7 +149,7 @@ func TestWalkEqualsIndependentMatches(t *testing.T) {
 		}
 		rng.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
 
-		all := NewRouter[int]()
+		all := NewRouter[int](opts...)
 		alone := map[int]*Router[int]{}
 		for i, p := range picked {
 			single := NewRouter[int]()
@@ -239,6 +252,107 @@ func TestRegexParam(t *testing.T) {
 		if got := r.GetParam(path, ps); got != want.hit || ps["x"] != want.x {
 			t.Errorf("GetParam(%q) = %d, x = %q, want %d, %q", path, got, ps["x"], want.hit, want.x)
 		}
+	}
+	if err := r.Set("/{y:[0-9]}1", 9); err == nil || !strings.Contains(err.Error(), "conflicts with") {
+		t.Errorf("the same regex under another name: got %v, want ErrExprConflict", err)
+	}
+	if err := r.Set("/{x:[0-9]}1", 9); err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("the same regex and name: got %v, want ErrConflict", err)
+	}
+	if err := r.Set("/{x:[a-z]}1", 9); err != nil {
+		t.Errorf("another regex at the same position: %v", err)
+	}
+}
+
+// params whose suffixes never end the same segment don't conflict.
+func TestParamSuffixesApart(t *testing.T) {
+	r := NewRouter[int]()
+	for i, p := range []string{"/a/{id}.json", "/a/{id}.xml", "/a/{name}-v1", "/a/{name}-v2"} {
+		if err := r.Set(p, i+1); err != nil {
+			t.Fatalf("Set(%q): %v", p, err)
+		}
+	}
+	for path, want := range map[string]int{"/a/1.json": 1, "/a/1.xml": 2, "/a/x-v1": 3, "/a/x-v2": 4, "/a/1.txt": 0} {
+		if got := r.Get(path); got != want {
+			t.Errorf("Get(%q) = %d, want %d", path, got, want)
+		}
+		if got := walk(r, path); want == 0 && len(got) != 0 || want != 0 && !reflect.DeepEqual(got, []int{want}) {
+			t.Errorf("Walk(%q) = %v, want %d", path, got, want)
+		}
+	}
+}
+
+// params of different suffixes don't conflict, the longer suffix going first.
+func TestParamSuffixPriority(t *testing.T) {
+	for _, order := range [][]string{
+		{"/a/{id}", "/a/{id}.json", "/a/{v}n"},
+		{"/a/{v}n", "/a/{id}.json", "/a/{id}"},
+		{"/a/{id}.json", "/a/{id}", "/a/{v}n"},
+	} {
+		r := NewRouter[string]()
+		for _, p := range order {
+			if err := r.Set(p, p); err != nil {
+				t.Fatalf("Set(%q) in %q: %v", p, order, err)
+			}
+		}
+		for path, want := range map[string]struct{ get, param string }{
+			"/a/1.json": {"/a/{id}.json", "1"},
+			"/a/1n":     {"/a/{v}n", "1"},
+			"/a/1":      {"/a/{id}", "1"},
+		} {
+			ps := map[string]string{}
+			if got := r.GetParam(path, ps); got != want.get || ps["id"]+ps["v"] != want.param {
+				t.Errorf("order %q: GetParam(%q) = %q, %v, want %q, %q", order, path, got, ps, want.get, want.param)
+			}
+		}
+	}
+}
+
+func TestAllowConflict(t *testing.T) {
+	conflicting := [][2]string{
+		{"/a/{id}", "/a/{oid}"},
+		{"/fx/{x:*}", "/fx/{path:*}"},
+		{"/a/{id}.json", "/a/{oid}.json"},
+		{"/r/{x:[0-9]}", "/r/{y:[0-9]}"},
+	}
+	for _, pair := range conflicting {
+		r := NewRouter[int]()
+		if err := r.Set(pair[0], 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Set(pair[1], 2); err == nil {
+			t.Errorf("%q next to %q: expected a conflict without AllowConflict", pair[1], pair[0])
+		}
+
+		r = NewRouter[int](AllowConflict())
+		if err := r.Set(pair[0], 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Set(pair[1], 2); err != nil {
+			t.Errorf("%q next to %q: %v", pair[1], pair[0], err)
+		}
+	}
+
+	r := NewRouter[int](AllowConflict())
+	for i, p := range []string{"/a/{id}", "/a/{oid}", "/a/{x:*}", "/a/{y:*}", "/a/{id}.json", "/a/{id}.xml"} {
+		if err := r.Set(p, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, want := range map[string][]int{
+		"/a/1":      {1, 2, 3, 4},
+		"/a/1/2":    {3, 4},
+		"/a/1.json": {1, 2, 3, 4, 5},
+		"/a/1.xml":  {1, 2, 3, 4, 6},
+	} {
+		got := walk(r, path)
+		sort.Ints(got)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("Walk(%q) = %v, want %v", path, got, want)
+		}
+	}
+	if err := r.Set("/a/{id}", 5); err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("the same pattern twice: got %v, want ErrConflict", err)
 	}
 }
 

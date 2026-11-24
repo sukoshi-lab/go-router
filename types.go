@@ -8,6 +8,9 @@ import (
 type matcher interface {
 	match(string) (int, string, bool)
 	equal(matcher) bool
+	// conflicts tells whether m, not equal, may match the same path at the
+	// same position, which Set refuses unless AllowConflict
+	conflicts(m matcher) bool
 	string() string
 }
 
@@ -21,6 +24,10 @@ func (l literal) equal(m matcher) bool {
 	if m2, ok := m.(literal); ok {
 		return l == m2
 	}
+	return false
+}
+
+func (l literal) conflicts(matcher) bool {
 	return false
 }
 
@@ -53,6 +60,13 @@ func (p param) equal(m matcher) bool {
 	return false
 }
 
+// conflicts with the same suffix under another name: {id} and {oid}. Params of
+// different suffixes go longer suffix first, so {id}.json is tried before {id}.
+func (p param) conflicts(m matcher) bool {
+	m2, ok := m.(param)
+	return ok && p.after == m2.after
+}
+
 func (p param) string() string {
 	return "{" + p.key + "}" + p.after
 }
@@ -68,6 +82,11 @@ func (w wildcard) equal(m matcher) bool {
 		return w == m2
 	}
 	return false
+}
+
+func (w wildcard) conflicts(m matcher) bool {
+	_, ok := m.(wildcard)
+	return ok
 }
 
 func (w wildcard) string() string {
@@ -86,13 +105,20 @@ func (w regex) match(s string) (int, string, bool) {
 
 func (w regex) equal(m matcher) bool {
 	if m2, ok := m.(regex); ok {
-		return w.String() == m2.String()
+		return w.key == m2.key && w.String() == m2.String()
 	}
 	return false
 }
 
+// conflicts with the same expression under another name; different
+// expressions may share a position.
+func (w regex) conflicts(m matcher) bool {
+	m2, ok := m.(regex)
+	return ok && w.String() == m2.String()
+}
+
 func (w regex) string() string {
-	return "{" + w.key + ":" + w.Regexp.String() + "}"
+	return "{" + w.key + ":" + w.String() + "}"
 }
 
 type node[T any] struct {

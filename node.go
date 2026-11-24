@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func (n *node[T]) add(path, fullPath string, handler T) (*node[T], error) {
+func (n *node[T]) add(path, fullPath string, handler T, allowConflict bool) (*node[T], error) {
 	for path != "" {
 		next, end, err := next(path)
 		if err != nil {
@@ -44,9 +44,12 @@ func (n *node[T]) add(path, fullPath string, handler T) (*node[T], error) {
 				inserted = true
 				break
 			}
-		case wildcard, param:
+		default:
+			if allowConflict {
+				break
+			}
 			for _, child := range n.children {
-				if typeID(child.m) == typeID(next) {
+				if next.conflicts(child.m) {
 					return nil, ErrExprConflict.With(fullPath, child.m.string())
 				}
 			}

@@ -17,6 +17,11 @@ func (n *node[T]) Less(i int, j int) bool {
 	if l, ok := l.m.(literal); ok {
 		return l > r.m.(literal) // sort by literal length
 	}
+	if l, ok := l.m.(param); ok {
+		if r := r.m.(param); len(l.after) != len(r.after) {
+			return len(l.after) > len(r.after) // longer suffix first
+		}
+	}
 	return i > j
 }
 
