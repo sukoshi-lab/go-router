@@ -34,17 +34,16 @@ type param struct {
 }
 
 func (p param) match(s string) (int, string, bool) {
-	if s == "" {
-		return 0, "", false
-	}
 	i := strings.IndexByte(s, '/')
 	if i == -1 {
 		i = len(s)
 	}
-	if p.after != "" {
-		i = strings.Index(s[:i], p.after)
+	// a param takes the whole segment, a non-empty value followed by the literal
+	// after it in the segment, as in {id}.json
+	if i <= len(p.after) || !strings.HasSuffix(s[:i], p.after) {
+		return 0, p.key, false
 	}
-	return i, p.key, i != -1
+	return i, p.key, true
 }
 
 func (p param) equal(m matcher) bool {

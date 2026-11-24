@@ -98,7 +98,11 @@ func (n *node[T]) get(path string, params map[string]string) *node[T] {
 			next = child
 		}
 		if params != nil && key != "" {
-			params[key] = strings.Clone(path[:end])
+			value := path[:end]
+			if p, ok := child.m.(param); ok {
+				value = value[:len(value)-len(p.after)]
+			}
+			params[key] = strings.Clone(value)
 		}
 		return next
 	}

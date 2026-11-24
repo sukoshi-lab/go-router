@@ -176,6 +176,44 @@ func TestWalkEqualsIndependentMatches(t *testing.T) {
 	}
 }
 
+// a param followed by a literal in its segment used to never match.
+func TestParamSuffix(t *testing.T) {
+	r := NewRouter[int]()
+	for i, p := range []string{"/a/{id}.json", "/b/{id}.json/c", "/c/{name}-v1", "/d/{id}/e"} {
+		if err := r.Set(p, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, want := range map[string]struct {
+		hit int
+		id  string
+	}{
+		"/a/1.json":      {1, "1"},
+		"/a/1.json.json": {1, "1.json"},
+		"/a/.json":       {0, ""},
+		"/a/1.xml":       {0, ""},
+		"/a/1.json/x":    {0, ""},
+		"/a/json":        {0, ""},
+		"/b/1.json/c":    {2, "1"},
+		"/b/1.json":      {0, ""},
+		"/c/abc-v1":      {3, "abc"},
+		"/c/abc-v2":      {0, ""},
+		"/d/1/e":         {4, "1"},
+		"/d//e":          {0, ""}, // a param is never empty
+	} {
+		ps := map[string]string{}
+		if got := r.GetParam(path, ps); got != want.hit {
+			t.Errorf("GetParam(%q) = %d, want %d", path, got, want.hit)
+		}
+		if id := ps["id"] + ps["name"]; id != want.id {
+			t.Errorf("GetParam(%q) param = %q, want %q", path, id, want.id)
+		}
+		if got := walk(r, path); (len(got) == 1 && got[0] == want.hit) != (want.hit != 0) || len(got) > 1 {
+			t.Errorf("Walk(%q) = %v, want %d", path, got, want.hit)
+		}
+	}
+}
+
 // Below tests are taken from fasthttp, licensed under the BSD 3-Clause License.
 type testRequests []struct {
 	path       string
