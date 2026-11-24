@@ -214,6 +214,34 @@ func TestParamSuffix(t *testing.T) {
 	}
 }
 
+// a regex param matches from where it starts; it used to match anywhere after.
+func TestRegexParam(t *testing.T) {
+	r := NewRouter[int]()
+	for i, p := range []string{"/{x:[0-9]}1", "/a/{x:[0-9]+}", "/d/{x:.*}", "/n/{x:[0-9]+}1"} {
+		if err := r.Set(p, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, want := range map[string]struct {
+		hit int
+		x   string
+	}{
+		"/a1":    {0, ""},
+		"/11":    {1, "1"},
+		"/a/12":  {2, "12"},
+		"/a/a12": {0, ""},
+		"/d/x/y": {3, "x/y"}, // a regex may span slashes
+		// a regex takes its leftmost-first match, never giving chars back to
+		// the literal after it
+		"/n/121": {0, ""},
+	} {
+		ps := map[string]string{}
+		if got := r.GetParam(path, ps); got != want.hit || ps["x"] != want.x {
+			t.Errorf("GetParam(%q) = %d, x = %q, want %d, %q", path, got, ps["x"], want.hit, want.x)
+		}
+	}
+}
+
 // Below tests are taken from fasthttp, licensed under the BSD 3-Clause License.
 type testRequests []struct {
 	path       string

@@ -46,7 +46,8 @@ func nextNonLiteral(path string) (matcher, int, error) {
 			case "*":
 				return wildcard(key), i + 2, nil
 			default:
-				return regex{key, regexp.MustCompile(ext)}, i + 2, nil
+				// anchored, a param matches from where it starts
+				return regex{key, regexp.MustCompile("^(?:" + ext + ")")}, i + 2, nil
 			}
 		case ':':
 			extend = i
