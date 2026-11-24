@@ -23,12 +23,36 @@ func AllowConflict() Option {
 
 // Set registers a value for the given URL pattern. It's not routine-safe.
 func (r *Router[T]) Set(path string, handler T) error {
-	if path == "" || path[0] != '/' {
-		return ErrInvalidPath.With(path)
+	n, err := r.add(path)
+	if err != nil {
+		return err
 	}
-	_, err := r.tree.add(path, path, handler, r.allowConflict)
+	if n.assigned {
+		return ErrConflict.With(path)
+	}
+	n.handler, n.assigned = handler, true
+	return nil
+}
+
+// Upsert registers path like Set, except that a pattern already registered is
+// no conflict: f gets the value there, the zero value for a new pattern, and
+// returns the value to store. It's not routine-safe.
+func (r *Router[T]) Upsert(path string, f func(old T) T) error {
+	n, err := r.add(path)
+	if err != nil {
+		return err
+	}
+	n.handler, n.assigned = f(n.handler), true
+	return nil
+}
+
+func (r *Router[T]) add(path string) (*node[T], error) {
+	if path == "" || path[0] != '/' {
+		return nil, ErrInvalidPath.With(path)
+	}
+	n, err := r.tree.add(path, path, r.allowConflict)
 	r.tree.sort()
-	return err
+	return n, err
 }
 
 // GetParam matches the given path and returns the corresponding value,

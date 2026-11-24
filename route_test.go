@@ -308,6 +308,39 @@ func TestParamSuffixPriority(t *testing.T) {
 	}
 }
 
+func TestUpsert(t *testing.T) {
+	or := func(bit int) func(int) int { return func(old int) int { return old | bit } }
+	r := NewRouter[int](AllowConflict())
+	for _, c := range []struct {
+		pattern string
+		bit     int
+	}{{"/a/{id}", 1}, {"/a/{id}", 2}, {"/a/{oid}", 4}, {"/b", 8}} {
+		if err := r.Upsert(c.pattern, or(c.bit)); err != nil {
+			t.Fatalf("Upsert(%q): %v", c.pattern, err)
+		}
+	}
+	if err := r.Set("/b", 16); err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("Set after Upsert of the same pattern: got %v, want ErrConflict", err)
+	}
+	if err := r.Upsert("/b", or(16)); err != nil {
+		t.Errorf("Upsert after Set: %v", err)
+	}
+	got := walk(r, "/a/1")
+	sort.Ints(got)
+	if !reflect.DeepEqual(got, []int{3, 4}) {
+		t.Errorf("Walk(/a/1) = %v, want [3 4]", got)
+	}
+	if got := r.Get("/b"); got != 24 {
+		t.Errorf("Get(/b) = %d, want 24", got)
+	}
+	if err := r.Upsert("b", or(1)); err == nil {
+		t.Error("Upsert of an invalid path: want an error")
+	}
+	if err := NewRouter[int]().Upsert("/{a}", or(1)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAllowConflict(t *testing.T) {
 	conflicting := [][2]string{
 		{"/a/{id}", "/a/{oid}"},

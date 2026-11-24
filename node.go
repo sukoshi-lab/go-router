@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-func (n *node[T]) add(path, fullPath string, handler T, allowConflict bool) (*node[T], error) {
+// add returns the node of path, creating it if needed, for the caller to assign.
+func (n *node[T]) add(path, fullPath string, allowConflict bool) (*node[T], error) {
 	for path != "" {
 		next, end, err := next(path)
 		if err != nil {
@@ -68,11 +69,6 @@ func (n *node[T]) add(path, fullPath string, handler T, allowConflict bool) (*no
 		n.children = append(n.children, newch)
 		n = newch
 	}
-	if n.assigned {
-		return nil, ErrConflict.With(fullPath)
-	}
-	n.handler = handler
-	n.assigned = true
 	return n, nil
 }
 
